@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from backend.data_processing import load_and_transform
 from backend.forecasting import forecast_time_series
 from st_aggrid import AgGrid, GridOptionsBuilder
+import plotly.graph_objects as go
 
 # Streamlit UI Setup
 st.title("📊 Multi-Model Time Series Forecasting")
@@ -84,10 +85,20 @@ if uploaded_file:
         with st.spinner("Running forecasts..."):
             train, test, results = forecast_time_series(df, target_item)
 
-        # Plot Forecast Results
-        plt.figure(figsize=(12, 6))
-        plt.plot(train["Month"], train["Value"], label="Train Data", color="blue")
-        plt.plot(test["Month"], test["Value"], label="Test Data", color="black", linestyle="dashed")
+        # # Plot Forecast Results
+        # plt.figure(figsize=(12, 6))
+        # plt.plot(train["Month"], train["Value"], label="Train Data", color="blue")
+        # plt.plot(test["Month"], test["Value"], label="Test Data", color="black", linestyle="dashed")
+
+        # Create the interactive Plotly figure
+        fig = go.Figure()
+
+        # Add train data
+        fig.add_trace(go.Scatter(x=train["Month"], y=train["Value"], mode='lines', name="Train Data", line=dict(color="blue")))
+
+        # Add test data
+        fig.add_trace(go.Scatter(x=test["Month"], y=test["Value"], mode='lines', name="Test Data", line=dict(color="blue")))
+
 
         for name, res in results.items():
             if name == "OpenAI":
@@ -95,14 +106,20 @@ if uploaded_file:
                 forecast_values = np.array([entry.value for entry in res["Forecast"]], dtype=float)
             else:
                 forecast_values = np.array(res["Forecast"], dtype=float)
-            plt.plot(test["Month"], forecast_values, label=name)
+            fig.add_trace(go.Scatter(x=test["Month"], y=forecast_values, mode='lines', name=name))
 
-        plt.legend()
-        plt.xlabel("Month")
-        plt.ylabel("Value")
-        plt.title("Forecasting Comparison")
-        plt.grid()
-        st.pyplot(plt)
+        # Update layout
+        fig.update_layout(
+            title="Forecasting Comparison",
+            xaxis_title="Month",
+            yaxis_title="Value",
+            hovermode="x",
+            template="plotly_white"
+        )
+
+# Render the interactive chart in Streamlit
+        st.plotly_chart(fig, use_container_width=True)
+
 
         # Show Metrics
         metrics_df = pd.DataFrame({name: [res["MAE"], res["RMSE"], res["MAPE"],res["R2"]] for name, res in results.items()},

@@ -96,7 +96,7 @@ def forecast_time_series(df, target_item, forecast_periods=12):
     train, test = train_test_split(data, test_size=forecast_periods, shuffle=False)
 
     models = {
-        "ARIMA": ARIMA(train["Value"], order=(1, 1, 1)).fit(),
+        "ARIMA": ARIMA(train["Value"], order=(5, 1, 3)).fit(),
         "Holt-Winters": ExponentialSmoothing(train["Value"], trend="add", seasonal="add", seasonal_periods=12).fit(),
         "SARIMA": SARIMAX(train["Value"], order=(1, 1, 1), seasonal_order=(1, 1, 1, 12)).fit(),
         "Prophet": Prophet().fit(train.rename(columns={"Month": "ds", "Value": "y"})),

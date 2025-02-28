@@ -16,6 +16,7 @@ import openai
 from pydantic import BaseModel, Field
 import re
 import json
+from pmdarima import auto_arima
 
 
 
@@ -33,7 +34,7 @@ class ForecastResponse(BaseModel):
     summary: str
 
 
-def forecast_with_openai(train, forecast_periods):
+def forecast_with_openai(train, forecast_periods, target_item):
     history_text = "\n".join(
         f"In {row.Month.strftime('%b-%y')}, the value was {row.Value}." for _, row in train.iterrows()
     )
@@ -41,7 +42,7 @@ def forecast_with_openai(train, forecast_periods):
     prompt = f"""
     Here is a time-series of financial data:
     {history_text}
-    Based on the above pattern, predict the next {forecast_periods} months and provide a summary explanation of the forecast.
+    Based on the above pattern of a organizations {target_item}, predict the next {forecast_periods} months and provide a summary explanation of the forecast.
     The summary should be a little detailed. How is the trend and seasonality, how they are affecting the months, etc. Keep it within 100 words, but well markdown formatted in bullet points for easily understandable.
     Don't use any model or code, use natural reasoning ability for forecasting.
     Return the response as a JSON object with keys 'forecast' and 'summary'.
@@ -92,7 +93,7 @@ def forecast_time_series(df, target_item, forecast_periods=12):
     train, test = train_test_split(data, test_size=forecast_periods, shuffle=False)
 
     models = {
-        "ARIMA": ARIMA(train["Value"], order=(1, 1, 1)).fit(),
+        # "ARIMA": ARIMA(train["Value"], order=(1, 1, 1)).fit(),
         "Holt-Winters": ExponentialSmoothing(train["Value"], trend="add", seasonal="add", seasonal_periods=12).fit(),
         "SARIMA": SARIMAX(train["Value"], order=(1, 1, 1), seasonal_order=(1, 1, 1, 12)).fit(),
         "Prophet": Prophet().fit(train.rename(columns={"Month": "ds", "Value": "y"})),
@@ -124,7 +125,7 @@ def forecast_time_series(df, target_item, forecast_periods=12):
 
 # OpenAI Forecasting
 
-    openai_forecast, forecast_summary = forecast_with_openai(train, forecast_periods)
+    openai_forecast, forecast_summary = forecast_with_openai(train, forecast_periods, target_item)
     forecast_values = np.array([entry.value for entry in openai_forecast])
 
     
@@ -136,6 +137,20 @@ def forecast_time_series(df, target_item, forecast_periods=12):
         "MAPE": round(mean_absolute_percentage_error(test["Value"], forecast_values), 3),
         "R2": round(r2_score(test["Value"], forecast_values),3),
         "Summary": forecast_summary
+    }
+
+
+    def forecast_arima(train, periods):
+        model = auto_arima(train["Value"], seasonal=False, stepwise=True, trace=True)
+        return model.predict(n_periods=periods, return_conf_int=True)
+    
+    arima_forecast, conf_int = forecast_arima(train, 12)
+    results["ARIMA"] = {
+        "Forecast": arima_forecast,
+        "MAE": round(mean_absolute_error(test["Value"], arima_forecast), 3),
+        "RMSE": round(np.sqrt(mean_squared_error(test["Value"], arima_forecast)), 3),
+        "MAPE": round(mean_absolute_percentage_error(test["Value"], arima_forecast), 3),
+        "R2": round(r2_score(test["Value"], arima_forecast),3),
     }
 
     return train, test, results
