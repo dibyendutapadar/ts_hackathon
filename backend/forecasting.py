@@ -12,7 +12,7 @@ from statsmodels.tsa.statespace.dynamic_factor import DynamicFactor
 from prophet import Prophet
 from statsmodels.tsa.forecasting.theta import ThetaModel
 from sklearn.model_selection import train_test_split
-from openai import OpenAI
+import openai
 from pydantic import BaseModel, Field
 import re
 import json
@@ -21,7 +21,7 @@ import json
 
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-client = OpenAI(api_key=OPENAI_API_KEY)
+client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
 
 class ForecastEntry(BaseModel):
@@ -35,7 +35,7 @@ class ForecastResponse(BaseModel):
 
 def forecast_with_openai(train, forecast_periods):
     history_text = "\n".join(
-        f"In {row.Month.strftime('%b-%Y')}, the value was {row.Value}." for _, row in train.iterrows()
+        f"In {row.Month.strftime('%b-%y')}, the value was {row.Value}." for _, row in train.iterrows()
     )
 
     prompt = f"""
