@@ -16,6 +16,10 @@ import openai
 from pydantic import BaseModel, Field
 import re
 import json
+from typing import List, Optional, Dict
+
+from backend.PredictV3EngineConfig import HoltWinterConfig, PredictEngineWeightageConfig, PredictSameMonthOnMonthConfig, PredictV3EngineConfig, ProjectionViaHoltWinterConfig, SSAForecastConfig, StatisticalDistributionConfig, StatisticalDistributionRiskBoundary
+from backend.V3Engine import GetPredictions
 
 
 
@@ -138,4 +142,36 @@ def forecast_time_series(df, target_item, forecast_periods=12):
         "Summary": forecast_summary
     }
 
+    predictv3_forecast = v3Prediction(train["Value"])
+    results["PredictV3"] = {
+        "Forecast": predictv3_forecast,
+        "MAE": round(mean_absolute_error(test["Value"], predictv3_forecast), 3),
+        "RMSE": round(np.sqrt(mean_squared_error(test["Value"], predictv3_forecast)), 3),
+        "MAPE": round(mean_absolute_percentage_error(test["Value"], predictv3_forecast), 3),
+        "R2": round(r2_score(test["Value"], predictv3_forecast),3)
+    }
+
     return train, test, results
+
+
+def v3Prediction(str_list):
+    floatList = list(map(float, str_list))
+    input_bucketized = transform_to_bucketize_series(floatList, 12)
+    prediction_config = PredictV3EngineConfig(False, 6, True, PredictSameMonthOnMonthConfig(0.1, 0.2, 0.3),
+                                          PredictEngineWeightageConfig(0.25, 0.25, 0.5), HoltWinterConfig(0.8, 0.9, 0.01),
+                                          SSAForecastConfig(5, 10, 100), ProjectionViaHoltWinterConfig(0.7, 0.9, 
+                                          StatisticalDistributionConfig(StatisticalDistributionRiskBoundary(0.3, 0.8), StatisticalDistributionRiskBoundary(0.15, 0.95), StatisticalDistributionRiskBoundary(0.1, 0.99), 36, 2.5, 0.05, 0.1, 0.2, 50.0, True), 0.0, True, 0.8, 1.2))
+
+    predictions = GetPredictions(input_bucketized, 1, prediction_config)
+    result = [prediction.predictedValue for prediction in predictions]
+    return result
+
+def transform_to_bucketize_series(flat_time_series: List[Optional[float]], period_count: int) -> List[List[Optional[float]]]:
+        result = []
+        for i in range(len(flat_time_series)):
+            if i < period_count:
+                result.append([flat_time_series[i]])
+            else:
+                index = i % period_count
+                result[index].append(flat_time_series[i])
+        return result

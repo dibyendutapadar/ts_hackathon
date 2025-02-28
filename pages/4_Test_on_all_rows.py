@@ -21,8 +21,10 @@ client = openai.OpenAI(api_key=OPENAI_API_KEY)
 uploaded_file = st.file_uploader("Upload an Excel file", type=["xlsx"])
 if uploaded_file:
     df_view = pd.read_excel(uploaded_file)
-    st.write("### Data Preview")
+    
     df_view = df_view.round(2)
+    st.write("### Data Preview")
+    st.dataframe(df_view, height=500, width=1000)
 
     # Load and Transform
     df = load_and_transform(uploaded_file)
@@ -96,9 +98,9 @@ if uploaded_file:
             ranking_data = []
 
         
-        st.write(response_data)
-        st.write(ranking_data)
-        st.write(ranking_summary)
+        # st.write(response_data)
+        # st.write(ranking_data)
+        # st.write(ranking_summary)
         
         if ranking_data:
             # Convert ranking data into DataFrame with variable column count
@@ -109,6 +111,7 @@ if uploaded_file:
             
             st.write("### Model Ranking Based on Performance")
             AgGrid(ranking_df)
+            st.write(ranking_summary)
         else:
             st.write("No ranking data available.")
         
