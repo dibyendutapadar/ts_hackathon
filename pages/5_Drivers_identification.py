@@ -110,7 +110,7 @@ if uploaded_file:
 
 
             st.write("### Model Performance Metrics")
-            st.write(metrics)
+            # st.write(metrics)
             metrics_df = pd.DataFrame(metrics).T
             metrics_df.columns = ["MAE", "RMSE", "MAPE", "R²"]
             st.dataframe(metrics_df)

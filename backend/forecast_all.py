@@ -17,6 +17,11 @@ from pydantic import BaseModel, Field
 import re
 import json
 from pmdarima import auto_arima
+from darts.models import NaiveSeasonal, NaiveMovingAverage, RandomForest
+from darts import TimeSeries
+from typing import List, Optional, Dict
+from backend.PredictV3EngineConfig import HoltWinterConfig, PredictEngineWeightageConfig, PredictSameMonthOnMonthConfig, PredictV3EngineConfig, ProjectionViaHoltWinterConfig, SSAForecastConfig, StatisticalDistributionConfig, StatisticalDistributionRiskBoundary
+from backend.V3Engine import GetPredictions
 
 
 
@@ -86,19 +91,68 @@ def forecast_with_openai(train, forecast_periods, target_item):
 
 
 
+def naivePrediction(train, periods, algorithm):
+    time_series = TimeSeries.from_dataframe(train, time_col="Month")
+    print(time_series)
+    if algorithm == "Naive":
+        model = NaiveSeasonal(12)
+    elif algorithm == "MovingAvg":
+        model = NaiveMovingAverage(12)
+    elif algorithm == "RandomForest":
+        model = RandomForest(lags=12, output_chunk_length=3)
+    else:
+        model = NaiveMovingAverage(3)
+    model.fit(time_series)
+    forecast = model.predict(periods)
+    forecast = forecast.values().flatten().tolist()
+    return forecast
+
+def accuracyOutput(naive_forecast, test):
+    return {
+        "Forecast": naive_forecast,
+        "MAE": round(mean_absolute_error(test, naive_forecast), 3),
+        "RMSE": round(np.sqrt(mean_squared_error(test, naive_forecast)), 3),
+        "MAPE": round(mean_absolute_percentage_error(test, naive_forecast), 3),
+        "Accuracy": 100- round(mean_absolute_percentage_error(test, naive_forecast), 3),
+        "R2": round(r2_score(test, naive_forecast), 3)
+    }
+
+def v3Prediction(str_list):
+    floatList = list(map(float, str_list))
+    input_bucketized = transform_to_bucketize_series(floatList, 12)
+    prediction_config = PredictV3EngineConfig(False, 6, True, PredictSameMonthOnMonthConfig(0.1, 0.2, 0.3),
+                                          PredictEngineWeightageConfig(0.25, 0.25, 0.5), HoltWinterConfig(0.8, 0.9, 0.01),
+                                          SSAForecastConfig(5, 10, 100), ProjectionViaHoltWinterConfig(0.7, 0.9, 
+                                          StatisticalDistributionConfig(StatisticalDistributionRiskBoundary(0.3, 0.8), StatisticalDistributionRiskBoundary(0.15, 0.95), StatisticalDistributionRiskBoundary(0.1, 0.99), 36, 2.5, 0.05, 0.1, 0.2, 50.0, True), 0.0, True, 0.8, 1.2))
+
+    predictions = GetPredictions(input_bucketized, 1, prediction_config)
+    result = [prediction.predictedValue for prediction in predictions]
+    return result
+
+def transform_to_bucketize_series(flat_time_series: List[Optional[float]], period_count: int) -> List[List[Optional[float]]]:
+        result = []
+        for i in range(len(flat_time_series)):
+            if i < period_count:
+                result.append([flat_time_series[i]])
+            else:
+                index = i % period_count
+                result[index].append(flat_time_series[i])
+        return result
 
 # Forecasting Function
-def forecast_time_series(df, target_item, forecast_periods=12):
+def forecast_time_series_all(df, target_item, forecast_periods=12):
     data = df[df["Item"] == target_item][["Month", "Value"]].sort_values("Month")
+    data = data.drop_duplicates(subset=["Month"], keep="first")
     train, test = train_test_split(data, test_size=forecast_periods, shuffle=False)
 
     models = {
-        # "ARIMA": ARIMA(train["Value"], order=(1, 1, 1)).fit(),
         "Holt-Winters": ExponentialSmoothing(train["Value"], trend="add", seasonal="add", seasonal_periods=12).fit(),
         "SARIMA": SARIMAX(train["Value"], order=(1, 1, 1), seasonal_order=(1, 1, 1, 12)).fit(),
         "Prophet": Prophet().fit(train.rename(columns={"Month": "ds", "Value": "y"})),
-        # "Theta": ThetaModel(train["Value"]).fit(),
-        # "Dynamic Factor": DynamicFactor(train["Value"], k_factors=1).fit()
+        "ARIMA": auto_arima(train["Value"], seasonal=False, stepwise=True, trace=True),
+        # "NaiveSeasonal": NaiveSeasonal(12).fit(TimeSeries.from_dataframe(train, time_col="Month")),
+        # "NaiveMovingAvg": NaiveMovingAverage(12).fit(TimeSeries.from_dataframe(train, time_col="Month")),
+        # "RandomForest": RandomForest(lags=12, output_chunk_length=3).fit(TimeSeries.from_dataframe(train, time_col="Month"))
     }
 
     results = {}
@@ -107,8 +161,8 @@ def forecast_time_series(df, target_item, forecast_periods=12):
     for name, model in models.items():
         if name == "Prophet":
             forecast = model.predict(test_df)["yhat"]
-        elif name == "Dynamic Factor":
-            forecast = model.predict(start=len(train), end=len(train) + len(test) - 1)
+        elif name in ["ARIMA", "NaiveSeasonal", "NaiveMovingAvg", "RandomForest"]:
+            forecast = model.predict(n_periods=len(test))
         else:
             forecast = model.forecast(steps=len(test))
 
@@ -117,9 +171,11 @@ def forecast_time_series(df, target_item, forecast_periods=12):
             "MAE": round(mean_absolute_error(test["Value"], forecast), 3),
             "RMSE": round(np.sqrt(mean_squared_error(test["Value"], forecast)),3),
             "MAPE": round(mean_absolute_percentage_error(test["Value"], forecast), 3),
+            "Accuracy" : 100 - round(mean_absolute_percentage_error(test["Value"], forecast), 3),
             "R2": round(r2_score(test["Value"], forecast),3)
             
         }
+
 
 
 
@@ -135,22 +191,32 @@ def forecast_time_series(df, target_item, forecast_periods=12):
         "MAE": round(mean_absolute_error(test["Value"], forecast_values), 3),
         "RMSE": round(np.sqrt(mean_squared_error(test["Value"], forecast_values)), 3),
         "MAPE": round(mean_absolute_percentage_error(test["Value"], forecast_values), 3),
+        "Accuracy" : 100 - round(mean_absolute_percentage_error(test["Value"], forecast_values), 3),
         "R2": round(r2_score(test["Value"], forecast_values),3),
         "Summary": forecast_summary
     }
 
 
-    def forecast_arima(train, periods):
-        model = auto_arima(train["Value"], seasonal=False, stepwise=True, trace=True)
-        return model.predict(n_periods=periods, return_conf_int=True)
-    
-    arima_forecast, conf_int = forecast_arima(train, 12)
-    results["ARIMA"] = {
-        "Forecast": arima_forecast,
-        "MAE": round(mean_absolute_error(test["Value"], arima_forecast), 3),
-        "RMSE": round(np.sqrt(mean_squared_error(test["Value"], arima_forecast)), 3),
-        "MAPE": round(mean_absolute_percentage_error(test["Value"], arima_forecast), 3),
-        "R2": round(r2_score(test["Value"], arima_forecast),3),
+
+    naive_forecast = naivePrediction(train, 12, "Naive")
+    results["Naive"] = accuracyOutput(naive_forecast, test["Value"])
+    ma_forecast = naivePrediction(train, 12, "MovingAvg")
+    results["Moving Avg"] = accuracyOutput(ma_forecast, test["Value"])
+    maq_forecast = naivePrediction(train, 12, "MovingAvgQuarter")
+    results["Moving Avg Quarter"] = accuracyOutput(maq_forecast, test["Value"])
+    RandomForest = naivePrediction(train, 12, "RandomForest")
+    results["Random Forest"] = accuracyOutput(RandomForest, test["Value"])
+
+
+    predictv3_forecast = v3Prediction(train["Value"])
+    results["PredictV3"] = {
+        "Forecast": predictv3_forecast,
+        "MAE": round(mean_absolute_error(test["Value"], predictv3_forecast), 3),
+        "RMSE": round(np.sqrt(mean_squared_error(test["Value"], predictv3_forecast)), 3),
+        "MAPE": round(mean_absolute_percentage_error(test["Value"], predictv3_forecast), 3),
+        "Accuracy" : 100 - round(mean_absolute_percentage_error(test["Value"], forecast_values), 3),
+        "R2": round(r2_score(test["Value"], predictv3_forecast),3)
     }
+
 
     return train, test, results
